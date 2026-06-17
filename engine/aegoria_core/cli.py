@@ -66,6 +66,47 @@ def cmd_query(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_assess(args: argparse.Namespace) -> int:
+    from .dataprep import get_studio
+
+    studio = get_studio(_engine(args.config))
+    report = studio.assess(
+        args.source, connector=args.connector, table=args.table,
+        query=args.query, limit=args.limit, dataset=args.dataset,
+    )
+    _print(report.model_dump())
+    return 0
+
+
+def cmd_clean(args: argparse.Namespace) -> int:
+    """Connect → assess → clean → write cleaned data, a JSON report and an AI bundle."""
+    from .dataprep import get_studio
+
+    studio = get_studio(_engine(args.config))
+    result = studio.onboard(
+        args.source, connector=args.connector, table=args.table, query=args.query,
+        dataset=args.dataset, limit=args.limit, out_dir=args.out, domain=args.domain,
+        land=not args.no_land, ai=not args.no_ai,
+    )
+    a, c = result.assessment, result.cleaning
+    _print({
+        "source": result.source,
+        "connector": result.connector,
+        "dataset": result.dataset,
+        "rows": {"input": c.input_rows, "output": c.output_rows, "estimate": a.row_estimate,
+                 "truncated": a.truncated},
+        "quality": {"before": c.input_quality_score, "after": c.output_quality_score},
+        "pii_columns": a.pii_columns,
+        "duplicate_rows": a.duplicate_rows,
+        "steps": [s.op for s in c.steps_applied],
+        "issues": a.issues_summary,
+        "landed_dataset": result.landed_dataset,
+        "ai_bundle": result.ai_bundle.model_dump() if result.ai_bundle else None,
+        "outputs": result.outputs,
+    })
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="aegoria", description="Aegoria core engine CLI")
     p.add_argument("-c", "--config", default=None, help="path to aegoria.yaml")
@@ -85,6 +126,27 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--purpose", default=None)
     q.add_argument("--epsilon", type=float, default=None, help="request differential privacy")
     q.set_defaults(func=cmd_query)
+
+    def _source_args(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("source", help="path/URL of a database or file (csv/parquet/sqlite/postgres)")
+        parser.add_argument("--connector", default=None, help="force a source connector (file|sqlite|sql)")
+        parser.add_argument("--table", default=None, help="table/file to read when the source has many")
+        parser.add_argument("--query", default=None, help="custom SQL to pull from the source")
+        parser.add_argument("--dataset", default=None, help="name for the prepared dataset")
+
+    a = sub.add_parser("assess", help="profile + quality/PII-assess an external source")
+    _source_args(a)
+    a.add_argument("--limit", type=int, default=50_000, help="rows to sample for assessment")
+    a.set_defaults(func=cmd_assess)
+
+    cl = sub.add_parser("clean", help="connect → assess → clean → cleaned data + report + AI bundle")
+    _source_args(cl)
+    cl.add_argument("--limit", type=int, default=200_000, help="max rows to clean")
+    cl.add_argument("--out", default=None, help="output directory (default: <warehouse>/../exports/<dataset>)")
+    cl.add_argument("--domain", default="prepared", help="domain to land the cleaned dataset under")
+    cl.add_argument("--no-land", action="store_true", help="do not register the cleaned table in the lakehouse")
+    cl.add_argument("--no-ai", action="store_true", help="do not emit the AI-ready JSONL bundle")
+    cl.set_defaults(func=cmd_clean)
     return p
 
 

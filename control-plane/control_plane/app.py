@@ -16,13 +16,15 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional, TypeVar
 
 import structlog
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, Field
@@ -186,6 +188,28 @@ class IngestBody(BaseModel):
 class LoginBody(BaseModel):
     username: str
     password: str
+
+
+class AssessBody(BaseModel):
+    source: str                       # path/URL of a database or file
+    connector: Optional[str] = None   # file | sqlite | sql (auto-detected if omitted)
+    table: Optional[str] = None
+    query: Optional[str] = None
+    dataset: Optional[str] = None
+    limit: int = 50_000
+
+
+class CleanBody(BaseModel):
+    source: str
+    connector: Optional[str] = None
+    table: Optional[str] = None
+    query: Optional[str] = None
+    dataset: Optional[str] = None
+    limit: int = 200_000
+    domain: str = "prepared"
+    land: bool = True
+    ai: bool = True
+    out_dir: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -770,6 +794,101 @@ def run_query(body: QueryBody, authorization: Optional[str] = Header(default=Non
     state.query_log.append(run)
     payload["id"] = run_id
     return payload
+
+
+# --------------------------------------------------------------------------- #
+# Data-prep: connect → assess → clean an external source (bring-your-own data)
+# --------------------------------------------------------------------------- #
+def _studio() -> Any:
+    from aegoria_core.dataprep import get_studio
+
+    return get_studio(engine())
+
+
+# Onboarding reads arbitrary host sources, lands governed datasets and emits PII
+# bundles — it is a privileged write/ingest action. Gate it to data stewards and
+# admins (the engine's RBAC already reserves write/admin for these roles).
+_ONBOARDING_ROLES = {"superadmin", "root", "admin", "owner", "steward"}
+
+
+def _require_onboarding(authorization: Optional[str]) -> Principal:
+    """Authenticate the caller and require a steward/admin/superadmin role."""
+    principal = auth.principal_from_bearer(authorization)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="authentication required: present a bearer token")
+    if not (_ONBOARDING_ROLES & set(principal.roles)):
+        raise HTTPException(
+            status_code=403,
+            detail="onboarding requires a steward/admin/superadmin role",
+        )
+    return principal
+
+
+@app.post("/assess")
+def assess(body: AssessBody, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
+    """Profile + quality/PII-assess an external database/file without cleaning it."""
+    _require_onboarding(authorization)
+    try:
+        report = _studio().assess(
+            body.source, connector=body.connector, table=body.table,
+            query=body.query, limit=body.limit, dataset=body.dataset,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return report.model_dump()
+
+
+@app.post("/clean")
+def clean(body: CleanBody, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
+    """Connect → assess → clean → write cleaned data, a JSON report and an AI bundle."""
+    principal = _require_onboarding(authorization)
+    try:
+        result = _studio().onboard(
+            body.source, connector=body.connector, table=body.table, query=body.query,
+            dataset=body.dataset, limit=body.limit, out_dir=body.out_dir,
+            domain=body.domain, land=body.land, ai=body.ai, principal=principal.subject,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result.model_dump()
+
+
+@app.post("/onboard/upload")
+async def onboard_upload(
+    request: Request,
+    filename: str = "upload.csv",
+    dataset: Optional[str] = None,
+    domain: str = "prepared",
+    land: bool = True,
+    ai: bool = True,
+    authorization: Optional[str] = Header(default=None),
+) -> dict[str, Any]:
+    """Upload a file's bytes (raw body) and run the full onboarding pipeline on it.
+
+    Lets the console drive onboarding for a user-supplied file without a shared
+    filesystem: the bytes ride the request, land in a temp dir, get onboarded,
+    then the temp source is removed (cleaned outputs persist in the warehouse).
+    """
+    principal = _require_onboarding(authorization)
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty upload")
+    tmpdir = tempfile.mkdtemp(prefix="aegoria-upload-")
+    try:
+        dest = os.path.join(tmpdir, os.path.basename(filename) or "upload.csv")
+        with open(dest, "wb") as fh:
+            fh.write(data)
+        result = _studio().onboard(
+            dest, dataset=dataset, domain=domain, land=land, ai=ai,
+            principal=principal.subject,
+        )
+        return result.model_dump()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @app.post("/ingest")

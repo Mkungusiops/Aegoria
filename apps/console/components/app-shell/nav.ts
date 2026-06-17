@@ -8,9 +8,11 @@ import {
   Share2,
   Workflow,
   TerminalSquare,
+  UploadCloud,
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { ONBOARD_ROLES } from "@/lib/onboard";
 
 export interface NavItem {
   href: string;
@@ -18,6 +20,8 @@ export interface NavItem {
   icon: LucideIcon;
   group: "Observe" | "Trust" | "Operate" | "Govern";
   badge?: string;
+  // If set, the item is only shown when the user holds one of these roles.
+  roles?: string[];
 }
 
 export const NAV: NavItem[] = [
@@ -27,6 +31,7 @@ export const NAV: NavItem[] = [
   { href: "/graph", label: "Knowledge Graph", icon: Share2, group: "Observe" },
   { href: "/trust", label: "Trust & Privacy", icon: ShieldCheck, group: "Trust" },
   { href: "/carbon", label: "Carbon & Compute", icon: Leaf, group: "Trust" },
+  { href: "/onboard", label: "Onboard Data", icon: UploadCloud, group: "Operate", roles: ONBOARD_ROLES },
   { href: "/pipelines", label: "Pipelines", icon: Workflow, group: "Operate" },
   { href: "/query", label: "Query Studio", icon: TerminalSquare, group: "Operate" },
   { href: "/packs", label: "Domain Packs", icon: Boxes, group: "Operate" },

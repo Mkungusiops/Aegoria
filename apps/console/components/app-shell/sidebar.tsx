@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { Wordmark } from "@/components/ui/logo";
 import { NAV, NAV_GROUPS } from "./nav";
 
-export function Sidebar() {
+export function Sidebar({ roles }: { roles?: string[] }) {
   const pathname = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col border-r border-hairline bg-veil-1/60 backdrop-blur-xl lg:flex">
@@ -21,7 +21,9 @@ export function Sidebar() {
           <div key={group} className="mb-5">
             <div className="px-3 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-faint">{group}</div>
             <ul className="space-y-0.5">
-              {NAV.filter((n) => n.group === group).map((item) => {
+              {NAV.filter(
+                (n) => n.group === group && (!n.roles || n.roles.some((r) => roles?.includes(r))),
+              ).map((item) => {
                 const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                 const Icon = item.icon;
                 return (
