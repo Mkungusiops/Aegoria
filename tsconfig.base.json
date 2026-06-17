@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "esModuleInterop": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "jsx": "preserve",
+    "baseUrl": ".",
+    "paths": {
+      "@aegoria/contracts": ["packages/contracts/src/index.ts"],
+      "@aegoria/contracts/*": ["packages/contracts/src/*"],
+      "@aegoria/core": ["packages/core/src/index.ts"],
+      "@aegoria/core/*": ["packages/core/src/*"],
+      "@aegoria/sdk": ["packages/sdk/src/index.ts"],
+      "@aegoria/sdk/*": ["packages/sdk/src/*"],
+      "@aegoria/ui": ["packages/ui/src/index.ts"],
+      "@aegoria/ui/*": ["packages/ui/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", ".next", ".turbo"]
+}

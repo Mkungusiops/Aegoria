@@ -1,0 +1,181 @@
+# Aegoria — docker compose
+#
+# Run from the REPO ROOT so the build context (`context: ..`) resolves engine/,
+# control-plane/, sdk/, domain-packs/ and apps/console:
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+# The DEFAULT stack is intentionally LEAN — only `console` + `api`, built on
+# python:3.12-slim and node:20-slim. Heavy data infrastructure (object store,
+# Iceberg/Nessie catalogs, Spark, Trino, Redpanda, Dagster) lives behind the
+# opt-in `scaleout` profile below and is NOT pulled or started by default.
+#
+# Scale-out:
+#   docker compose -f deploy/docker-compose.yml --profile scaleout up
+#
+# THE ONE INVARIANT: the core engine never changes when you swap infra. Every
+# service below is reached through an adapter/service provider name, so the
+# scaleout profile is purely a deployment concern, not an engine concern.
+
+name: aegoria
+
+services:
+  # -------------------------------------------------------------------------
+  # Console — Next.js standalone control surface. Serves built-in fixtures, so
+  # it renders a guaranteed-good UI even before the API is reachable.
+  # -------------------------------------------------------------------------
+  console:
+    build:
+      # Build context is the repo root; the Dockerfile lives under deploy/.
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    image: aegoria/console:dev
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # The console works fully standalone on fixtures. To drive the UI from the
+      # LIVE engine via the control-plane API instead, uncomment the next line
+      # (the api service is on the same compose network and resolvable by name):
+      # AEGORIA_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # API — FastAPI control-plane over the embedded ("lite") lakehouse engine.
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: aegoria/api:dev
+    ports:
+      - "8000:8000"
+    environment:
+      AEGORIA_WAREHOUSE: /data/.aegoria
+      # Seed realistic sample datasets into the embedded lakehouse on first boot
+      # so the live engine serves real data. Override with AEGORIA_SEED=0.
+      AEGORIA_SEED: "${AEGORIA_SEED:-1}"
+    volumes:
+      # Persist the embedded lakehouse warehouse. A NAMED volume (not a host bind
+      # mount) inherits the image path's ownership (uid 10001 `aegoria`), so the
+      # non-root container can write the Iceberg warehouse + SQLite catalog.
+      - aegoria-warehouse:/data/.aegoria
+    restart: unless-stopped
+
+# ===========================================================================
+# OPT-IN scale-out mesh (profile: scaleout)
+#
+# These services turn the embedded laptop lakehouse into a planet-scale one by
+# swapping the engine's adapters/services to point at real infra — WITHOUT
+# touching the core engine. They are NOT started by default. Enable with:
+#
+#   docker compose -f deploy/docker-compose.yml --profile scaleout up
+#
+# Each service maps to an Aegoria provider you would register/select via config:
+#   minio        -> StorageAdapter "s3" (object store for the lakehouse)
+#   iceberg-rest -> LakehouseService "iceberg" (Iceberg REST catalog)
+#   nessie       -> CatalogAdapter (git-like, versioned table catalog)
+#   spark        -> ComputeAdapter "spark" (distributed compute)
+#   trino        -> ComputeAdapter "trino" (federated SQL)
+#   redpanda     -> StreamAdapter "kafka" (Kafka-API streaming bus)
+#   dagster      -> ComputeScheduler (carbon-aware orchestration UI)
+# ===========================================================================
+  minio:
+    profiles: ["scaleout"]
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: aegoria
+      MINIO_ROOT_PASSWORD: aegoria-secret
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  iceberg-rest:
+    profiles: ["scaleout"]
+    # Iceberg REST catalog backed by the MinIO object store above.
+    image: tabulario/iceberg-rest:1.6.0
+    depends_on:
+      - minio
+    environment:
+      CATALOG_WAREHOUSE: s3://aegoria/warehouse
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: aegoria
+      AWS_SECRET_ACCESS_KEY: aegoria-secret
+      AWS_REGION: us-east-1
+    ports:
+      - "8181:8181"
+
+  nessie:
+    profiles: ["scaleout"]
+    # Git-like, versioned catalog (branches/tags over Iceberg tables).
+    image: ghcr.io/projectnessie/nessie:0.92.1
+    environment:
+      # In-memory store keeps the demo footprint tiny; swap to ROCKSDB/JDBC for
+      # durable multi-node deployments.
+      NESSIE_VERSION_STORE_TYPE: IN_MEMORY
+    ports:
+      - "19120:19120"
+
+  spark:
+    profiles: ["scaleout"]
+    # Distributed compute. The engine's Spark ComputeAdapter submits here.
+    image: bitnami/spark:3.5
+    environment:
+      SPARK_MODE: master
+    ports:
+      - "7077:7077"   # Spark master RPC
+      - "8080:8080"   # Spark master UI
+
+  trino:
+    profiles: ["scaleout"]
+    # Federated SQL across the lakehouse + external sources.
+    image: trinodb/trino:451
+    ports:
+      - "8081:8080"   # Trino UI/HTTP (host 8081 to avoid clashing with Spark UI)
+
+  redpanda:
+    profiles: ["scaleout"]
+    # Kafka-API-compatible streaming bus for the StreamAdapter "kafka" provider.
+    image: redpandadata/redpanda:v24.1.7
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"   # Kafka API
+      - "9644:9644"   # Admin API
+
+  dagster:
+    profiles: ["scaleout"]
+    # Orchestration UI; pairs with the carbon-aware ComputeScheduler service.
+    image: dagster/dagster-celery-k8s:1.7.10
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3030"]
+    environment:
+      DAGSTER_HOME: /opt/dagster/dagster_home
+    ports:
+      - "3030:3030"   # Dagster web UI
+
+volumes:
+  # Embedded lakehouse warehouse + catalog for the default (lite) stack.
+  aegoria-warehouse:
+  # Object-store data for the scaleout profile (created lazily on first use).
+  minio-data:

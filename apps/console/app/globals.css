@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---- Theme variables. Dark is the default; `html.light` flips the canvas. ---- */
+:root {
+  --font-display: "Inter Tight", system-ui, sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Dark "Veil" canvas */
+  --veil: 7 10 18;
+  --veil-1: 11 15 26;
+  --veil-2: 18 24 41;
+  --veil-3: 26 34 54;
+  --hairline: 30 39 64;
+  --lumen: 234 241 255;
+  --muted: 147 161 192;
+  --faint: 92 107 138;
+  --glow-a: 22 224 196; /* auralis */
+  --glow-b: 123 97 255; /* pulse   */
+  --grid: 255 255 255;
+
+  color-scheme: dark;
+}
+
+html.light {
+  /* Premium light theme */
+  --veil: 244 247 251;
+  --veil-1: 255 255 255;
+  --veil-2: 240 244 250;
+  --veil-3: 228 233 242;
+  --hairline: 214 221 233;
+  --lumen: 15 23 42;
+  --muted: 71 85 110;
+  --faint: 132 142 165;
+  --glow-a: 22 224 196;
+  --glow-b: 123 97 255;
+  --grid: 12 22 40;
+
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--hairline));
+  }
+  body {
+    @apply bg-veil text-lumen font-sans antialiased;
+    background-image: theme("backgroundImage.veil-glow");
+    background-attachment: fixed;
+    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  }
+  ::selection {
+    background: rgb(var(--glow-a) / 0.28);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--veil-3));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--hairline));
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .surface {
+    @apply rounded-lg border border-hairline bg-veil-1/70 backdrop-blur-xl;
+  }
+  .surface-2 {
+    @apply rounded-lg border border-hairline bg-veil-2/60 backdrop-blur-xl;
+  }
+  .hairline-x {
+    background: linear-gradient(90deg, transparent, rgb(var(--hairline)), transparent);
+  }
+  .text-auralis-gradient {
+    @apply bg-auralis-gradient bg-clip-text text-transparent;
+  }
+  .glow-dot {
+    box-shadow: 0 0 0 4px rgba(22, 224, 196, 0.12), 0 0 16px 2px rgba(22, 224, 196, 0.5);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .grid-bg {
+    background-image: theme("backgroundImage.grid-faint");
+    background-size: 44px 44px;
+  }
+}

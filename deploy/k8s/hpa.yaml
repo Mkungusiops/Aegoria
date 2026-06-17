@@ -1,0 +1,51 @@
+# HorizontalPodAutoscaler for the control-plane API.
+#
+# The carbon-aware ComputeScheduler service shifts heavy batch work in time;
+# this HPA scales the always-on request-serving tier with load. Together they
+# keep the platform planet-scale without ever touching the core engine.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aegoria-api
+  namespace: aegoria
+  labels:
+    app.kubernetes.io/name: aegoria-api
+    app.kubernetes.io/part-of: aegoria
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aegoria-api
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      # Conservative scale-down so query latency stays smooth under bursty load.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+      selectPolicy: Max

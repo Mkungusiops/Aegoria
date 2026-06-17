@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1.7
+#
+# Aegoria API image — the control-plane (FastAPI) fronting the core engine.
+#
+# IMPORTANT: the build context is the REPO ROOT (set `context: ..` in compose),
+# so the image can see engine/, control-plane/, sdk/ and domain-packs/.
+#
+# LEAN by design: python:3.12-slim, the embedded "lite" lakehouse extra
+# (DuckDB + PyIceberg-on-SQLite + Polars/pyarrow), and the API extra (FastAPI +
+# uvicorn). No Spark/Kafka here — those live behind the compose `scaleout`
+# profile and the k8s mesh.
+
+# ---------------------------------------------------------------------------
+# Stage 1: builder — compile wheels into an isolated virtualenv.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Build deps for any packages that need compilation (kept minimal; removed below).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends build-essential \
+  && rm -rf /var/lib/apt/lists/*
+
+# Self-contained venv so we can copy a clean tree into the runtime stage.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip
+
+# Copy the source trees that ship in the image. (control-plane / sdk /
+# domain-packs are sibling packages onboarded by the platform.)
+COPY engine /src/engine
+COPY control-plane /src/control-plane
+COPY sdk /src/sdk
+COPY domain-packs /src/domain-packs
+
+# Install the engine with the embedded lakehouse + API extras, then the
+# control-plane and the SDK. Editable installs keep the layout transparent and
+# let mounted source (in dev) take effect without a rebuild.
+RUN pip install -e "/src/engine[lite,api]" \
+  && pip install -e "/src/control-plane" \
+  && pip install -e "/src/sdk"
+
+# ---------------------------------------------------------------------------
+# Stage 2: runtime — slim image carrying just the venv + source.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    # Where the embedded lakehouse writes its warehouse (mounted as a volume).
+    AEGORIA_WAREHOUSE=/data/.aegoria \
+    # Set to "1" to seed sample data on container start (see entrypoint).
+    AEGORIA_SEED=0
+
+# curl for the healthcheck (tiny) and a non-root runtime user.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --create-home --uid 10001 aegoria \
+  && mkdir -p /data/.aegoria \
+  && chown -R aegoria:aegoria /data
+
+# Carry over the prepared venv and the editable source trees.
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /src /src
+
+# Container start logic: optional sample-data seed, then serve the API.
+COPY deploy/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
+RUN chmod +x /usr/local/bin/api-entrypoint.sh
+
+USER aegoria
+WORKDIR /src
+
+EXPOSE 8000
+
+# Liveness/readiness — the control-plane exposes GET /health.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/api-entrypoint.sh"]
+CMD ["uvicorn", "control_plane.app:app", "--host", "0.0.0.0", "--port", "8000"]

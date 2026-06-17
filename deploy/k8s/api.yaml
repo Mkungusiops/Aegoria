@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aegoria-api
+  namespace: aegoria
+  labels:
+    app.kubernetes.io/name: aegoria-api
+    app.kubernetes.io/part-of: aegoria
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aegoria-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aegoria-api
+        app.kubernetes.io/part-of: aegoria
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          # Replace with your registry-pushed image
+          # (built from deploy/Dockerfile.api with context = repo root).
+          image: aegoria/api:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: AEGORIA_WAREHOUSE
+              value: /data/.aegoria
+            # In the scale-out mesh, point these at the object-store / catalog
+            # adapters instead of the embedded warehouse. The engine never
+            # changes — only the provider config does.
+            - name: AEGORIA_SEED
+              value: "0"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: warehouse
+              mountPath: /data/.aegoria
+      volumes:
+        # emptyDir for the embedded lite warehouse. For durable multi-node
+        # deployments, swap the storage adapter to an object store (MinIO/S3)
+        # and drop this volume — the engine resolves the provider from config.
+        - name: warehouse
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aegoria-api
+  namespace: aegoria
+  labels:
+    app.kubernetes.io/name: aegoria-api
+    app.kubernetes.io/part-of: aegoria
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: aegoria-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

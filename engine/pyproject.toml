@@ -1,0 +1,53 @@
+[project]
+name = "aegoria-core"
+version = "0.1.0"
+description = "Aegoria core engine — a domain-neutral, privacy-preserving big-data lakehouse platform. The core never changes; infra is swapped via adapters and domains via domain-packs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Aegoria" }]
+dependencies = [
+  "pydantic>=2.6",
+  "pyyaml>=6.0",
+  "structlog>=24.1",
+  "typing-extensions>=4.10",
+  "packaging>=23.0",
+]
+
+[project.optional-dependencies]
+# Embedded / low-resource lakehouse that runs on a laptop and fits a tight disk budget.
+lite = [
+  "pyarrow>=15.0",
+  "duckdb>=0.10",
+  "polars>=0.20",
+  "pyiceberg[sql-sqlite,duckdb]>=0.6",
+  "numpy>=1.26",
+]
+# Scale-out backends (pulled only when running the docker-compose / k8s mesh).
+spark = ["pyspark>=3.5"]
+kafka = ["confluent-kafka>=2.3"]
+ml = ["scikit-learn>=1.4", "numpy>=1.26"]
+privacy = ["numpy>=1.26"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "orjson>=3.9"]
+dev = ["pytest>=8.0", "pytest-cov>=4.1", "ruff>=0.5", "mypy>=1.10"]
+
+[project.scripts]
+aegoria = "aegoria_core.cli:app"
+
+[project.entry-points."aegoria.providers"]
+reference = "aegoria_core._builtins:load"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aegoria_core"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

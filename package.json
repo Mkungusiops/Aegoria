@@ -1,0 +1,24 @@
+{
+  "name": "aegoria",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aegoria — a planet-scale, market-agnostic, privacy-preserving data platform. The core engine never changes; domains onboard as swappable domain-packs.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@aegoria/console",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "console": "pnpm --filter @aegoria/console dev",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.6.3"
+  }
+}

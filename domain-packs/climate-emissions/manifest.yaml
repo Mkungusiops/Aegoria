@@ -1,0 +1,424 @@
+# =============================================================================
+# Aegoria Domain-Pack — Climate / Emissions
+# -----------------------------------------------------------------------------
+# This file IS the onboarding. It describes an entire market to Aegoria purely
+# as data: schemas, ontology, semantic mappings, quality rules, ingestion
+# connectors, ML model references and default access policy. The core engine
+# loads it; the core engine never changes.
+#
+# This pack is one of two deliberately UNRELATED reference domains shipped to
+# prove the platform is market-agnostic. It exercises the geospatial, imagery,
+# sensor_stream and time_series modalities end-to-end.
+# =============================================================================
+api_version: aegoria.dev/v1
+kind: DomainPack
+id: climate-emissions
+name: Climate & Greenhouse-Gas Emissions
+version: 0.1.0
+description: >-
+  Facility-level CO2-equivalent emissions, satellite-detected methane plumes and
+  ground air-quality sensor streams. A market-neutral reference pack demonstrating
+  geospatial, imagery, sensor-stream and time-series ingestion under open data
+  governance with content watermarking.
+maintainer: Aegoria Reference Packs <packs@aegoria.dev>
+core_compat: ">=0.1.0,<1.0.0"
+
+license:
+  spdx_id: CC-BY-4.0
+  name: Creative Commons Attribution 4.0 International
+  url: https://creativecommons.org/licenses/by/4.0/
+  attribution: "Aegoria Climate & Emissions Reference Pack"
+  redistributable: true
+  commercial_use: true
+
+modalities:
+  - time_series
+  - geospatial
+  - imagery
+  - sensor_stream
+
+# ---------------------------------------------------------------------------
+# Datasets — schema-on-read declarations with governance defaults.
+# ---------------------------------------------------------------------------
+datasets:
+  # -- facility_emissions ---------------------------------------------------
+  - name: facility_emissions
+    title: Facility CO2-equivalent Emissions
+    description: >-
+      Periodic CO2-equivalent emission observations reported per industrial
+      facility, with point geometry and reporting operator.
+    modality: time_series
+    tags: [emissions, co2e, facility, reporting]
+    sample_data: sample_data/facility_emissions.parquet
+    schema:
+      name: facility_emissions
+      version: 1.0.0
+      modality: time_series
+      description: Per-facility CO2e emission time series.
+      primary_key: [facility_id, observed_at]
+      partition_by: [observed_at]
+      fields:
+        - name: facility_id
+          type: string
+          nullable: false
+          description: Stable identifier of the emitting facility.
+          sensitivity: public
+          semantic_type: emissions:Facility
+        - name: geom
+          type: geometry
+          nullable: false
+          description: Point location of the facility (WKT, EPSG:4326).
+          unit: degrees
+          sensitivity: public
+          semantic_type: emissions:Region
+        - name: co2e_tonnes
+          type: double
+          nullable: false
+          description: CO2-equivalent emissions for the observation window.
+          unit: t CO2e
+          sensitivity: public
+          semantic_type: emissions:CO2e
+        - name: observed_at
+          type: timestamp
+          nullable: false
+          description: UTC timestamp of the emission observation.
+          sensitivity: public
+          semantic_type: emissions:Emission
+        - name: operator
+          type: string
+          nullable: true
+          description: Reporting operator / owner of the facility.
+          sensitivity: public
+          semantic_type: emissions:Facility
+    license:
+      spdx_id: CC-BY-4.0
+      name: Creative Commons Attribution 4.0 International
+      url: https://creativecommons.org/licenses/by/4.0/
+    jurisdiction:
+      code: GLOBAL
+      region: global
+      regulations: []
+      residency_required: false
+    quality_rules:
+      - id: fe_facility_id_not_null
+        field: facility_id
+        kind: not_null
+        severity: error
+        description: Every emission row must reference a facility.
+      - id: fe_observed_at_not_null
+        field: observed_at
+        kind: not_null
+        severity: error
+        description: Every emission row must be timestamped.
+      - id: fe_co2e_non_negative
+        field: co2e_tonnes
+        kind: range
+        params: {min: 0.0}
+        severity: error
+        description: CO2e tonnes cannot be negative.
+      - id: fe_freshness
+        field: observed_at
+        kind: freshness
+        params: {max_age_seconds: 2592000}
+        severity: warn
+        description: Emission observations should be no older than 30 days.
+
+  # -- sentinel_plumes ------------------------------------------------------
+  - name: sentinel_plumes
+    title: Satellite Methane Plume Detections
+    description: >-
+      Methane (CH4) plume concentrations detected from satellite imagery tiles,
+      with the tile footprint geometry and capture time.
+    modality: imagery
+    tags: [methane, ch4, satellite, imagery, geospatial, sentinel]
+    sample_data: sample_data/sentinel_plumes.parquet
+    schema:
+      name: sentinel_plumes
+      version: 1.0.0
+      modality: imagery
+      description: Satellite-derived CH4 plume detections per imagery tile.
+      primary_key: [tile_id, captured_at]
+      partition_by: [captured_at]
+      fields:
+        - name: tile_id
+          type: string
+          nullable: false
+          description: Identifier of the source imagery tile.
+          sensitivity: public
+          semantic_type: emissions:Region
+        - name: geom
+          type: geometry
+          nullable: false
+          description: Footprint polygon of the imagery tile (WKT, EPSG:4326).
+          unit: degrees
+          sensitivity: public
+          semantic_type: emissions:Region
+        - name: ch4_ppb
+          type: double
+          nullable: false
+          description: Detected methane concentration enhancement.
+          unit: ppb
+          sensitivity: public
+          semantic_type: emissions:Emission
+        - name: captured_at
+          type: timestamp
+          nullable: false
+          description: UTC timestamp of the satellite acquisition.
+          sensitivity: public
+          semantic_type: emissions:Emission
+    license:
+      spdx_id: CC-BY-4.0
+      name: Creative Commons Attribution 4.0 International
+      url: https://creativecommons.org/licenses/by/4.0/
+    jurisdiction:
+      code: EU
+      region: eu
+      regulations: [GDPR]
+      residency_required: false
+    quality_rules:
+      - id: sp_tile_id_not_null
+        field: tile_id
+        kind: not_null
+        severity: error
+        description: Every plume detection must reference an imagery tile.
+      - id: sp_ch4_non_negative
+        field: ch4_ppb
+        kind: range
+        params: {min: 0.0}
+        severity: error
+        description: Methane enhancement cannot be negative.
+      - id: sp_freshness
+        field: captured_at
+        kind: freshness
+        params: {max_age_seconds: 1209600}
+        severity: warn
+        description: Plume detections should be no older than 14 days.
+
+  # -- ground_sensors -------------------------------------------------------
+  - name: ground_sensors
+    title: Ground Air-Quality Sensor Stream
+    description: >-
+      High-frequency ground sensor readings of particulate matter (PM2.5) and
+      carbon dioxide concentration, used for near-real-time air-quality.
+    modality: sensor_stream
+    tags: [air-quality, pm25, co2, sensor, stream]
+    sample_data: sample_data/ground_sensors.csv
+    schema:
+      name: ground_sensors
+      version: 1.0.0
+      modality: sensor_stream
+      description: Streaming PM2.5 / CO2 readings from ground sensors.
+      primary_key: [sensor_id, ts]
+      partition_by: [ts]
+      fields:
+        - name: sensor_id
+          type: string
+          nullable: false
+          description: Stable identifier of the ground sensor.
+          sensitivity: public
+          semantic_type: emissions:Sensor
+        - name: pm25
+          type: double
+          nullable: false
+          description: Particulate-matter (PM2.5) concentration.
+          unit: ug/m3
+          sensitivity: public
+          semantic_type: emissions:Emission
+        - name: co2_ppm
+          type: double
+          nullable: false
+          description: Carbon-dioxide concentration.
+          unit: ppm
+          sensitivity: public
+          semantic_type: emissions:CO2e
+        - name: ts
+          type: timestamp
+          nullable: false
+          description: UTC timestamp of the sensor reading.
+          sensitivity: public
+          semantic_type: emissions:Emission
+    license:
+      spdx_id: CC-BY-4.0
+      name: Creative Commons Attribution 4.0 International
+      url: https://creativecommons.org/licenses/by/4.0/
+    jurisdiction:
+      code: GLOBAL
+      region: global
+      regulations: []
+      residency_required: false
+    quality_rules:
+      - id: gs_sensor_id_not_null
+        field: sensor_id
+        kind: not_null
+        severity: error
+        description: Every reading must reference a sensor.
+      - id: gs_pm25_non_negative
+        field: pm25
+        kind: range
+        params: {min: 0.0}
+        severity: error
+        description: PM2.5 cannot be negative.
+      - id: gs_co2_range
+        field: co2_ppm
+        kind: range
+        params: {min: 0.0, max: 100000.0}
+        severity: warn
+        description: CO2 ppm must fall within a physically plausible range.
+      - id: gs_freshness
+        field: ts
+        kind: freshness
+        params: {max_age_seconds: 3600}
+        severity: warn
+        description: Sensor readings should be no older than one hour.
+
+# ---------------------------------------------------------------------------
+# Ontology — domain vocabulary aligned to external standards via same_as.
+# ---------------------------------------------------------------------------
+ontology:
+  - id: emissions:Facility
+    label: Facility
+    description: An installation or site that emits greenhouse gases.
+    same_as:
+      - http://www.w3.org/ns/sosa/Platform
+      - https://schema.org/Place
+  - id: emissions:Emission
+    label: Emission
+    description: A measured release of a substance to the atmosphere.
+    same_as:
+      - http://www.w3.org/ns/sosa/Observation
+  - id: emissions:CO2e
+    label: CO2 Equivalent
+    parent: emissions:Emission
+    description: Carbon-dioxide-equivalent measure of greenhouse-gas warming potential.
+    same_as:
+      - http://qudt.org/vocab/quantitykind/Mass
+      - https://schema.org/QuantitativeValue
+  - id: emissions:Region
+    label: Region
+    description: A geographic area or footprint associated with emissions.
+    same_as:
+      - http://www.w3.org/2003/01/geo/wgs84_pos#SpatialThing
+      - https://schema.org/GeoShape
+  - id: emissions:Sensor
+    label: Sensor
+    parent: emissions:Facility
+    description: A device that observes air quality or emission concentrations.
+    same_as:
+      - http://www.w3.org/ns/sosa/Sensor
+
+# ---------------------------------------------------------------------------
+# Semantic mappings — raw columns gain meaning + interoperability.
+# ---------------------------------------------------------------------------
+semantic_mappings:
+  - {dataset: facility_emissions, field: facility_id,  term: emissions:Facility}
+  - {dataset: facility_emissions, field: geom,         term: emissions:Region}
+  - {dataset: facility_emissions, field: co2e_tonnes,  term: emissions:CO2e}
+  - {dataset: facility_emissions, field: observed_at,  term: emissions:Emission}
+  - {dataset: facility_emissions, field: operator,     term: emissions:Facility}
+  - {dataset: sentinel_plumes,    field: tile_id,      term: emissions:Region}
+  - {dataset: sentinel_plumes,    field: geom,         term: emissions:Region}
+  - {dataset: sentinel_plumes,    field: ch4_ppb,      term: emissions:Emission}
+  - {dataset: sentinel_plumes,    field: captured_at,  term: emissions:Emission}
+  - {dataset: ground_sensors,     field: sensor_id,    term: emissions:Sensor}
+  - {dataset: ground_sensors,     field: pm25,         term: emissions:Emission}
+  - {dataset: ground_sensors,     field: co2_ppm,      term: emissions:CO2e}
+  - {dataset: ground_sensors,     field: ts,           term: emissions:Emission}
+
+# ---------------------------------------------------------------------------
+# Connectors — ingestion sources the pack knows how to read.
+# ---------------------------------------------------------------------------
+connectors:
+  - id: facility_emissions_parquet
+    modality: time_series
+    adapter: file
+    format: parquet
+    target_dataset: facility_emissions
+    options: {compression: snappy}
+  - id: facility_emissions_csv
+    modality: time_series
+    adapter: file
+    format: csv
+    target_dataset: facility_emissions
+    options: {delimiter: ",", header: true}
+  - id: sentinel_plumes_parquet
+    modality: imagery
+    adapter: file
+    format: parquet
+    target_dataset: sentinel_plumes
+    options: {compression: snappy}
+  - id: sentinel_plumes_geojson
+    modality: geospatial
+    adapter: file
+    format: geojson
+    target_dataset: sentinel_plumes
+    options: {geometry_field: geom, crs: "EPSG:4326"}
+  - id: ground_sensors_csv
+    modality: sensor_stream
+    adapter: file
+    format: csv
+    target_dataset: ground_sensors
+    options: {delimiter: ",", header: true}
+    schedule: "*/5 * * * *"
+
+# ---------------------------------------------------------------------------
+# Models — per-domain ML references. The core stays generic.
+# ---------------------------------------------------------------------------
+models:
+  - id: emission_spike_anomaly
+    task: anomaly
+    runtime: sklearn
+    target_dataset: facility_emissions
+    params:
+      method: robust_zscore
+      field: co2e_tonnes
+      threshold: 3.5
+      group_by: facility_id
+  - id: methane_plume_anomaly
+    task: anomaly
+    runtime: sklearn
+    target_dataset: sentinel_plumes
+    params:
+      method: robust_zscore
+      field: ch4_ppb
+      threshold: 3.0
+  - id: emission_forecast
+    task: forecast
+    runtime: sklearn
+    target_dataset: facility_emissions
+    params:
+      method: seasonal_naive
+      field: co2e_tonnes
+      horizon: 7
+      group_by: facility_id
+
+# ---------------------------------------------------------------------------
+# Access policies — open read with a watermark obligation by default.
+# ---------------------------------------------------------------------------
+access_policies:
+  - id: open_read_watermarked
+    description: >-
+      Open public read access to all climate-emissions datasets, with a
+      watermark obligation attached to any materialized output for attribution.
+    effect: allow
+    roles: [public, analyst, researcher]
+    actions: [read, query, sample, aggregate]
+    datasets: ["*"]
+    obligations:
+      - kind: watermark
+        params:
+          text: "Aegoria Climate & Emissions (CC-BY-4.0)"
+          mode: visible
+          attribution: "Aegoria Climate & Emissions Reference Pack"
+  - id: deny_raw_export_anonymous
+    description: >-
+      Anonymous principals may not bulk-export raw rows; aggregate access only.
+    effect: deny
+    roles: [public]
+    actions: [export]
+    datasets: ["*"]
+    condition: "principal.subject == 'anonymous'"
+
+metadata:
+  homepage: https://aegoria.dev/packs/climate-emissions
+  category: environment
+  keywords: [climate, emissions, ghg, methane, air-quality, geospatial]

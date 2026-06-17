@@ -1,0 +1,480 @@
+# =============================================================================
+# Aegoria domain-pack — Consumer Credit
+# =============================================================================
+# A privacy-first lending domain: loan underwriting + repayment behaviour.
+# Everything that makes this domain "credit" lives in THIS file — the Aegoria
+# core never learns the words "borrower" or "GDPR". Sovereignty, PII handling
+# and differential privacy are declared as policy data, not coded into anything.
+#
+# Onboard a market by writing one of these. That is the whole point.
+# =============================================================================
+api_version: aegoria.dev/v1
+kind: DomainPack
+id: consumer-credit
+name: Consumer Credit
+version: 0.1.0
+description: >-
+  Retail lending underwriting and repayment behaviour for EU consumers.
+  Ships PII-aware schemas, FIBO-aligned ontology, fairness-oriented models,
+  and privacy-first default access policy (mask-by-default, EU residency,
+  differential privacy on every aggregate).
+maintainer: aegoria-reference-packs
+license:
+  spdx_id: Apache-2.0
+  name: Apache License 2.0
+  url: https://www.apache.org/licenses/LICENSE-2.0
+  attribution: Aegoria Consumer-Credit reference pack (synthetic data only)
+  redistributable: true
+  commercial_use: true
+  notes: >-
+    Schemas and policies are reference material. Bundled sample data is wholly
+    synthetic; it contains no real persons and must not be treated as PII.
+core_compat: ">=0.1.0,<1.0.0"
+
+modalities:
+  - structured
+  - time_series
+
+# -----------------------------------------------------------------------------
+# Datasets
+# -----------------------------------------------------------------------------
+datasets:
+  # --- loan_applications -----------------------------------------------------
+  - name: loan_applications
+    title: Loan Applications
+    description: >-
+      One row per credit application: applicant identity (PII), declared
+      financials, and the adjudication outcome. The high-water mark for
+      sensitivity in this pack — every read is masked unless the caller owns
+      the record.
+    modality: structured
+    schema:
+      name: loan_applications
+      version: 1.0.0
+      modality: structured
+      primary_key: [application_id]
+      fields:
+        - name: application_id
+          type: string
+          nullable: false
+          description: Stable, opaque application identifier.
+          sensitivity: internal
+          semantic_type: cc:Application
+        - name: applicant_name
+          type: string
+          nullable: false
+          description: Full legal name of the applicant.
+          sensitivity: pii
+          pii: true
+          semantic_type: cc:Borrower
+        - name: national_id
+          type: string
+          nullable: false
+          description: Government-issued national identifier (direct identifier).
+          sensitivity: pii
+          pii: true
+          semantic_type: cc:Borrower
+        - name: email
+          type: string
+          nullable: false
+          description: Contact email address of the applicant.
+          sensitivity: pii
+          pii: true
+          semantic_type: cc:Borrower
+        - name: income
+          type: double
+          nullable: false
+          unit: EUR/year
+          description: Declared gross annual income.
+          sensitivity: financial
+          semantic_type: cc:Income
+        - name: amount
+          type: double
+          nullable: false
+          unit: EUR
+          description: Requested principal amount.
+          sensitivity: financial
+          semantic_type: cc:Application
+        - name: decision
+          type: string
+          nullable: false
+          description: Adjudication outcome of the application.
+          sensitivity: confidential
+          semantic_type: cc:Application
+    license:
+      spdx_id: Apache-2.0
+      name: Apache License 2.0
+      redistributable: true
+      commercial_use: true
+      notes: Synthetic sample data only.
+    jurisdiction:
+      code: EU
+      region: europe
+      regulations: [GDPR, ECOA]
+      residency_required: true
+    tags: [lending, underwriting, pii, financial]
+    sample_data: sample_data/loan_applications.parquet
+    quality_rules:
+      - id: la_application_id_not_null
+        field: application_id
+        kind: not_null
+        severity: error
+        description: Every application must carry an identifier.
+      - id: la_application_id_unique
+        field: application_id
+        kind: unique
+        severity: error
+        description: Application identifiers must be unique.
+      - id: la_applicant_name_not_null
+        field: applicant_name
+        kind: not_null
+        severity: error
+        description: Applicant name is mandatory.
+      - id: la_national_id_not_null
+        field: national_id
+        kind: not_null
+        severity: error
+        description: National identifier is mandatory.
+      - id: la_email_regex
+        field: email
+        kind: regex
+        severity: error
+        params:
+          pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+        description: Email must be a syntactically valid address.
+      - id: la_income_non_negative
+        field: income
+        kind: range
+        severity: error
+        params:
+          min: 0
+        description: Declared income may not be negative.
+      - id: la_amount_positive
+        field: amount
+        kind: range
+        severity: error
+        params:
+          min: 0
+          exclusive_min: true
+        description: Requested amount must be greater than zero.
+      - id: la_decision_enum
+        field: decision
+        kind: enum
+        severity: error
+        params:
+          values: [approved, declined, review]
+        description: Decision must be one of the recognised outcomes.
+
+  # --- repayment_history -----------------------------------------------------
+  - name: repayment_history
+    title: Repayment History
+    description: >-
+      Monthly account servicing snapshots: outstanding balance and delinquency
+      bucket per account, per month. Pseudonymous (keyed by account, not by
+      person), but still EU-resident behavioural data.
+    modality: time_series
+    schema:
+      name: repayment_history
+      version: 1.0.0
+      modality: time_series
+      primary_key: [account_id, month]
+      partition_by: [month]
+      fields:
+        - name: account_id
+          type: string
+          nullable: false
+          description: Pseudonymous account identifier (links to a funded loan).
+          sensitivity: internal
+          semantic_type: cc:Account
+        - name: month
+          type: date
+          nullable: false
+          description: First day of the servicing month this snapshot covers.
+          sensitivity: internal
+          semantic_type: cc:Account
+        - name: balance
+          type: double
+          nullable: false
+          unit: EUR
+          description: Outstanding principal at month end.
+          sensitivity: financial
+          semantic_type: cc:Account
+        - name: days_past_due
+          type: int
+          nullable: false
+          unit: days
+          description: Days past due at month end (0 = current).
+          sensitivity: confidential
+          semantic_type: cc:Delinquency
+    license:
+      spdx_id: Apache-2.0
+      name: Apache License 2.0
+      redistributable: true
+      commercial_use: true
+      notes: Synthetic sample data only.
+    jurisdiction:
+      code: EU
+      region: europe
+      regulations: [GDPR, ECOA]
+      residency_required: true
+    tags: [lending, servicing, behavioural, time_series]
+    sample_data: sample_data/repayment_history.parquet
+    quality_rules:
+      - id: rh_account_id_not_null
+        field: account_id
+        kind: not_null
+        severity: error
+        description: Every snapshot must reference an account.
+      - id: rh_month_not_null
+        field: month
+        kind: not_null
+        severity: error
+        description: Every snapshot must carry its servicing month.
+      - id: rh_balance_non_negative
+        field: balance
+        kind: range
+        severity: error
+        params:
+          min: 0
+        description: Outstanding balance may not be negative.
+      - id: rh_days_past_due_non_negative
+        field: days_past_due
+        kind: range
+        severity: warn
+        params:
+          min: 0
+        description: Delinquency in days may not be negative.
+
+# -----------------------------------------------------------------------------
+# Ontology — local credit vocabulary aligned to FIBO (Financial Industry
+# Business Ontology). same_as gives the terms global meaning for interop.
+# -----------------------------------------------------------------------------
+ontology:
+  - id: cc:Borrower
+    label: Borrower
+    description: A natural person who applies for or holds consumer credit.
+    same_as:
+      - https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Borrower
+      - https://schema.org/Person
+  - id: cc:Application
+    label: Credit Application
+    description: A request by a borrower for a credit facility and its adjudication.
+    same_as:
+      - https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansGeneral/Loans/LoanApplication
+  - id: cc:Income
+    label: Income
+    parent: cc:Borrower
+    description: Periodic gross earnings declared by an applicant.
+    same_as:
+      - https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Income
+  - id: cc:Account
+    label: Credit Account
+    description: A funded loan account that is serviced over time.
+    same_as:
+      - https://spec.edmcouncil.org/fibo/ontology/FBC/ProductsAndServices/FinancialProductsAndServices/Account
+  - id: cc:Delinquency
+    label: Delinquency
+    parent: cc:Account
+    description: A state in which an account is past due on contractual payments.
+    same_as:
+      - https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansGeneral/Loans/DelinquentLoan
+
+# -----------------------------------------------------------------------------
+# Semantic mappings — raw columns -> ontology terms.
+# -----------------------------------------------------------------------------
+semantic_mappings:
+  - dataset: loan_applications
+    field: applicant_name
+    term: cc:Borrower
+  - dataset: loan_applications
+    field: national_id
+    term: cc:Borrower
+  - dataset: loan_applications
+    field: email
+    term: cc:Borrower
+  - dataset: loan_applications
+    field: income
+    term: cc:Income
+  - dataset: loan_applications
+    field: amount
+    term: cc:Application
+  - dataset: loan_applications
+    field: decision
+    term: cc:Application
+  - dataset: repayment_history
+    field: account_id
+    term: cc:Account
+  - dataset: repayment_history
+    field: balance
+    term: cc:Account
+  - dataset: repayment_history
+    field: days_past_due
+    term: cc:Delinquency
+
+# -----------------------------------------------------------------------------
+# Connectors — how the pack ingests its own datasets.
+# -----------------------------------------------------------------------------
+connectors:
+  - id: loan_applications_csv
+    modality: structured
+    adapter: file
+    format: csv
+    target_dataset: loan_applications
+    options:
+      path: sample_data/loan_applications.csv
+      header: true
+  - id: loan_applications_parquet
+    modality: structured
+    adapter: file
+    format: parquet
+    target_dataset: loan_applications
+    options:
+      path: sample_data/loan_applications.parquet
+  - id: repayment_history_csv
+    modality: time_series
+    adapter: file
+    format: csv
+    target_dataset: repayment_history
+    options:
+      path: sample_data/repayment_history.csv
+      header: true
+  - id: repayment_history_parquet
+    modality: time_series
+    adapter: file
+    format: parquet
+    target_dataset: repayment_history
+    options:
+      path: sample_data/repayment_history.parquet
+
+# -----------------------------------------------------------------------------
+# Models — per-domain ML references. The core stays generic; the pack ships the
+# fairness-aware risk scorer and the delinquency forecaster.
+# -----------------------------------------------------------------------------
+models:
+  - id: fair_risk_scorer
+    task: classify
+    runtime: remote
+    target_dataset: loan_applications
+    uri: pack://consumer-credit/pack.py#fair_risk_score
+    params:
+      objective: approve_probability
+      # Attributes the scorer must NOT consume, directly or as proxies.
+      protected_attributes: [applicant_name, national_id, email]
+      # Group-fairness target enforced at evaluation time.
+      fairness_metric: demographic_parity
+      fairness_tolerance: 0.05
+  - id: delinquency_forecaster
+    task: forecast
+    runtime: remote
+    target_dataset: repayment_history
+    uri: pack://consumer-credit/pack.py#delinquency_forecast
+    params:
+      target: days_past_due
+      horizon_months: 3
+      group_by: account_id
+
+# -----------------------------------------------------------------------------
+# Access policies — PRIVACY-FIRST DEFAULTS.
+#
+# Policy is evaluated deny-overrides: any matching deny wins. The pack ships a
+# stack that, by default, exposes nothing useful about an individual:
+#   1. Residency  — processing outside the EU is denied outright.
+#   2. PII mask   — direct identifiers are masked unless the caller owns the row.
+#   3. DP         — every aggregate is answered under differential privacy.
+#   4. Analysts   — may only aggregate, never read row-level data.
+# All of this is data. The engine enforces the obligations; it never knows why.
+# -----------------------------------------------------------------------------
+access_policies:
+  # 1. Hard sovereignty boundary: EU-resident data may not be processed abroad.
+  - id: deny_processing_outside_eu
+    description: >-
+      GDPR data-residency: deny any access whose processing jurisdiction is not
+      the EU. Residency wins over every allow rule.
+    effect: deny
+    actions: [read, query, sample, aggregate, export, train]
+    datasets: ["*"]
+    condition: principal.jurisdiction != "EU"
+    obligations:
+      - kind: residency
+        params:
+          allowed_regions: [EU]
+
+  # 2. Mask direct identifiers for everyone who is not the data subject.
+  - id: mask_pii_unless_owner
+    description: >-
+      Default-mask all PII on loan applications. Only a principal whose subject
+      matches the record owner sees raw identifiers; everyone else gets masked.
+    effect: allow
+    roles: [underwriter, support, analyst, auditor]
+    actions: [read, query, sample]
+    datasets: [loan_applications]
+    condition: principal.subject != resource.owner
+    obligations:
+      - kind: mask
+        params:
+          fields: [applicant_name, national_id, email]
+          strategy: partial
+          reveal_last: 0
+
+  # 3. Differential privacy on every aggregate, across both datasets.
+  - id: dp_on_aggregates
+    description: >-
+      All aggregate queries are answered under (epsilon=1.0) differential
+      privacy with bounded budget accounting per principal.
+    effect: allow
+    roles: [analyst, data_scientist, auditor]
+    actions: [aggregate, query]
+    datasets: ["*"]
+    obligations:
+      - kind: differential_privacy
+        params:
+          epsilon: 1.0
+          delta: 1.0e-6
+          mechanism: laplace
+
+  # 4. Analysts are aggregate-only: never row-level, never export.
+  - id: analysts_aggregate_only
+    description: >-
+      The analyst role may compute aggregates but may never retrieve, sample or
+      export row-level records.
+    effect: deny
+    roles: [analyst]
+    actions: [read, sample, export]
+    datasets: ["*"]
+    obligations:
+      - kind: aggregate_only
+        params:
+          min_group_size: 25
+
+  # 5. Underwriters get row-level access to applications for a lawful purpose.
+  - id: underwriter_row_access
+    description: >-
+      Underwriters may read and query row-level applications for the express
+      purpose of adjudication, subject to the residency and mask rules above.
+    effect: allow
+    roles: [underwriter]
+    actions: [read, query, sample]
+    datasets: [loan_applications, repayment_history]
+    condition: principal.attributes.purpose == "underwriting"
+
+# -----------------------------------------------------------------------------
+# Free-form metadata — surfaced in the catalog, ignored by the core.
+# -----------------------------------------------------------------------------
+metadata:
+  market: retail-lending
+  data_classification: highly-sensitive
+  privacy_posture: privacy-first-by-default
+  default_privacy_budget:
+    epsilon: 1.0
+    delta: 1.0e-6
+  sovereignty:
+    residency: EU
+    cross_border_transfers: prohibited
+  regulatory_basis:
+    GDPR: General Data Protection Regulation (EU) 2016/679
+    ECOA: Equal Credit Opportunity Act (fairness reference)
+  fairness:
+    protected_attributes: [applicant_name, national_id, email]
+    note: >-
+      Direct identifiers are excluded from scoring; the fairness metric guards
+      against learned proxies.

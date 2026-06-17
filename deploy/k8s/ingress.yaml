@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aegoria
+  namespace: aegoria
+  labels:
+    app.kubernetes.io/part-of: aegoria
+  annotations:
+    # Generic ingress-nginx annotations; adjust for your controller.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    # Console at the apex; control-plane API under /api (the console can also be
+    # pointed at this via AEGORIA_API_URL for live data).
+    - host: aegoria.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: aegoria-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aegoria-console
+                port:
+                  number: 3000
+  # tls:
+  #   - hosts: ["aegoria.example.com"]
+  #     secretName: aegoria-tls

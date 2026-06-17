@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aegoria
+  labels:
+    app.kubernetes.io/part-of: aegoria
+    # Mesh placement label — used by the hybrid multi-cloud/edge scheduler to
+    # decide where Aegoria control-plane pods may land. See README.md.
+    aegoria.io/tier: control-plane

@@ -1,0 +1,81 @@
+# syntax=docker/dockerfile:1.7
+#
+# Aegoria Console image — the enterprise control surface.
+#
+# IMPORTANT: the build context is the REPO ROOT (set `context: ..` in compose),
+# because the console is part of a pnpm workspace and Next's standalone output
+# traces workspace `node_modules` that live above apps/console.
+#
+# The image is intentionally LEAN: base node:20-slim, multi-stage so only the
+# Next standalone server + static assets land in the runtime layer.
+#
+# The console serves built-in fixtures from apps/console/lib/data, so it renders
+# a guaranteed-good UI even with no API attached. We deliberately do NOT bake
+# AEGORIA_API_URL here — switch to live engine data via compose / k8s env.
+
+# ---------------------------------------------------------------------------
+# Stage 1: deps — install the full workspace once, cached on lockfile changes.
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS deps
+WORKDIR /app
+
+# Enable the pinned pnpm via Corepack (version comes from package.json).
+RUN corepack enable
+
+# Copy only the manifests first to maximize layer caching.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/console/package.json apps/console/package.json
+
+# Install workspace deps (offline-friendly, frozen lockfile for reproducibility).
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# ---------------------------------------------------------------------------
+# Stage 2: builder — produce the Next standalone bundle.
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS builder
+WORKDIR /app
+RUN corepack enable
+
+# Reuse installed node_modules from the deps stage.
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/console/node_modules ./apps/console/node_modules
+
+# Bring in the workspace config + the console source.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc tsconfig.base.json turbo.json ./
+COPY apps/console ./apps/console
+
+# Next telemetry off; build the standalone server.
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+RUN pnpm --filter @aegoria/console build
+
+# ---------------------------------------------------------------------------
+# Stage 3: runner — minimal runtime with just the standalone output.
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+# Run as the unprivileged `node` user shipped in the base image.
+USER node
+
+# Next standalone layout for a monorepo:
+#   <standalone>/apps/console/server.js  + traced node_modules
+#   static assets live under .next/static and must be copied alongside.
+COPY --chown=node:node --from=builder /app/apps/console/.next/standalone ./
+COPY --chown=node:node --from=builder /app/apps/console/.next/static ./apps/console/.next/static
+COPY --chown=node:node --from=builder /app/apps/console/public ./apps/console/public
+
+EXPOSE 3000
+
+# Healthcheck: the home page is statically renderable from fixtures.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+  CMD node -e "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+
+# Standalone server entrypoint (monorepo path).
+CMD ["node", "apps/console/server.js"]

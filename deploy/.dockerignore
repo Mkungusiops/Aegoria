@@ -1,0 +1,47 @@
+# Build context is the REPO ROOT for both Dockerfiles, so this ignore file keeps
+# the context small and the images reproducible. Anything listed here is never
+# sent to the Docker daemon.
+
+# JS / Next.js
+node_modules
+**/node_modules
+.next
+**/.next
+.turbo
+**/.turbo
+*.tsbuildinfo
+
+# Python
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+**/.pytest_cache
+.mypy_cache
+**/.mypy_cache
+.ruff_cache
+**/.ruff_cache
+*.egg-info
+**/*.egg-info
+build
+dist
+**/dist
+
+# Local lakehouse warehouse + runtime state (mounted as a volume instead)
+.aegoria
+**/.aegoria
+
+# VCS / editor / OS noise
+.git
+.gitignore
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Docs / deploy artifacts that the images never need
+deploy/k8s
+**/*.md
