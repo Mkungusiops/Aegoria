@@ -80,14 +80,20 @@ def detect_connector(uri: str, explicit: Optional[str] = None) -> str:
     """Pick a connector name from an explicit hint or the URI shape/extension.
 
     - ``sqlite``  : ``*.db`` / ``*.sqlite`` / ``sqlite://`` paths
-    - ``sql``     : ``postgres(ql)://`` / ``mysql(+driver)://`` SQLAlchemy URLs
+    - ``sql``     : any other SQLAlchemy URL — ``postgresql://``, ``mysql://``,
+                    ``mariadb://``, ``oracle://``, ``mssql://``, ``…+driver://``
     - ``file``    : ``*.csv`` / ``*.parquet`` / ``*.json`` files or a directory
     """
     if explicit:
         return explicit
     low = uri.lower()
-    if low.startswith(("postgres://", "postgresql://", "mysql://", "mysql+", "postgresql+")):
-        return "sql"
-    if low.startswith("sqlite://") or low.endswith((".db", ".sqlite", ".sqlite3")):
+    if low.startswith("sqlite://"):
+        return "sqlite"
+    if "://" in low:
+        scheme = low.split("://", 1)[0]
+        if scheme == "file":
+            return "file"
+        return "sql"  # postgresql, mysql, mariadb, oracle, mssql, snowflake, …
+    if low.endswith((".db", ".sqlite", ".sqlite3")):
         return "sqlite"
     return "file"

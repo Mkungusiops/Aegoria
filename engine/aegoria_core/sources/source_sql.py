@@ -38,7 +38,7 @@ class SqlSource:
 
             # SQLAlchemy 2.x resolves the DBAPI driver eagerly here, so a missing
             # driver/dialect must be caught inside the guard, not just the import.
-            return create_engine(uri)
+            return create_engine(_normalize_url(uri))
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dep
             raise RuntimeError(_MISSING) from exc
         except Exception as exc:  # pragma: no cover - unknown dialect, etc.
@@ -115,6 +115,29 @@ class SqlSource:
             return arrow, descriptor
         finally:
             eng.dispose()
+
+
+def _normalize_url(uri: str) -> str:
+    """Map a bare DB URL to the driver Aegoria bundles, so common URLs just work.
+
+    ``postgres(ql)://…`` → ``postgresql+psycopg://…`` (psycopg v3)
+    ``mysql://…`` / ``mariadb://…`` → ``mysql+pymysql://…`` (pure-python pymysql)
+    ``oracle://…`` → ``oracle+oracledb://…`` (python-oracledb, thin mode)
+    A URL that already names a ``+driver`` is left untouched.
+    """
+    if "://" not in uri:
+        return uri
+    scheme, rest = uri.split("://", 1)
+    if "+" in scheme:  # explicit driver already chosen
+        return uri
+    s = scheme.lower()
+    if s in ("postgres", "postgresql"):
+        return f"postgresql+psycopg://{rest}"
+    if s in ("mysql", "mariadb"):
+        return f"mysql+pymysql://{rest}"
+    if s == "oracle":
+        return f"oracle+oracledb://{rest}"
+    return uri
 
 
 def _rows_to_arrow(rows: list[list[Any]], names: list[str]) -> pa.Table:

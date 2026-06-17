@@ -39,7 +39,7 @@ COPY domain-packs /src/domain-packs
 # Install the engine with the embedded lakehouse + API extras, then the
 # control-plane and the SDK. Editable installs keep the layout transparent and
 # let mounted source (in dev) take effect without a rebuild.
-RUN pip install -e "/src/engine[lite,api]" \
+RUN pip install -e "/src/engine[lite,api,sources]" \
   && pip install -e "/src/control-plane" \
   && pip install -e "/src/sdk"
 
